@@ -14,7 +14,7 @@
     <DebugType>none</DebugType>
     <AssemblyName>ParquetPro</AssemblyName>
     <Product>PARQUET PRO</Product>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     <NoWarn>CS8632;CA1416;WFO1000;WFAC010</NoWarn>
     <InvariantGlobalization>false</InvariantGlobalization>

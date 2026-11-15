@@ -59,7 +59,7 @@ public static class Seed
         {
             ["sim_time"] = U.D(start), ["vitesse"] = 60, ["moteur_actif"] = 1, ["autonomie_defaut"] = 3, ["frequence"] = "1.0",
             ["backup_min"] = 30, ["reprise"] = "auto", ["fond"] = 0, ["demarrage_windows"] = 0, ["densite"] = "Normale",
-            ["panneau_droit"] = 1, ["favoris"] = "Mon cabinet,Délégations,Messagerie,Agenda", ["derniere_fermeture"] = "", ["seed_version"] = 1,
+            ["panneau_droit"] = 1, ["favoris"] = "Cabinet du procureur,Décisions,Dossiers,Messagerie", ["derniere_fermeture"] = "", ["seed_version"] = 1,
             ["popup_notifs"] = 1, ["heure_debut_journee"] = 8, ["sequence"] = 0
         };
         foreach (var kv in defaults) c.Set(kv.Key, kv.Value);
@@ -141,9 +141,9 @@ public static class Seed
         c.Exec("INSERT INTO utilisateurs(login,mdp,role,collab_id) VALUES('consultation',@p0,'Consultation',@p1)", U.Hash("consultation"), heads["SG"]);
         foreach (var d in Auth.Droits)
         {
-            c.Exec("INSERT INTO autorisations VALUES('Procureur',@p0)", d);
-            if (d != "admin") c.Exec("INSERT INTO autorisations VALUES('Procureur adjoint',@p0)", d);
-            if (d is "admin" or "personnel.modifier" or "documents.gerer" or "moteur.piloter") c.Exec("INSERT INTO autorisations VALUES('Administrateur',@p0)", d);
+            c.Exec("INSERT OR IGNORE INTO autorisations VALUES('Procureur',@p0)", d);
+            if (d != "admin") c.Exec("INSERT OR IGNORE INTO autorisations VALUES('Procureur adjoint',@p0)", d);
+            if (d is "admin" or "personnel.modifier" or "documents.gerer" or "moteur.piloter") c.Exec("INSERT OR IGNORE INTO autorisations VALUES('Administrateur',@p0)", d);
         }
 
         progress(80, "Préparation des dossiers et des premières activités…");

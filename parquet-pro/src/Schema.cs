@@ -2,7 +2,7 @@ namespace ParquetPro;
 
 public static class Schema
 {
-    public const int Version = 1;
+    public const int Version = 2;
 
     const string V1 = @"
 CREATE TABLE IF NOT EXISTS parametres(cle TEXT PRIMARY KEY, valeur TEXT);
@@ -61,12 +61,58 @@ CREATE TABLE IF NOT EXISTS autorisations(role TEXT, droit TEXT, PRIMARY KEY(role
 CREATE TABLE IF NOT EXISTS vues(id INTEGER PRIMARY KEY AUTOINCREMENT, module TEXT, nom TEXT, filtre TEXT);
 ";
 
+    const string V2 = @"
+CREATE TABLE IF NOT EXISTS personnes(id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT UNIQUE, nom TEXT, prenom TEXT, sexe TEXT, date_naissance TEXT, lieu_naissance TEXT, adresse TEXT, ville TEXT, profession TEXT,
+  statut TEXT DEFAULT 'Sans antécédent', mesure TEXT, notes TEXT, date_creation TEXT);
+CREATE INDEX IF NOT EXISTS ix_pers_nom ON personnes(nom, prenom);
+CREATE TABLE IF NOT EXISTS dossier_personnes(dossier_id INTEGER, personne_id INTEGER, role TEXT, declaration TEXT, date_ajout TEXT, source TEXT, PRIMARY KEY(dossier_id, personne_id, role));
+CREATE INDEX IF NOT EXISTS ix_dp_pers ON dossier_personnes(personne_id);
+CREATE TABLE IF NOT EXISTS vehicules(id INTEGER PRIMARY KEY AUTOINCREMENT, immatriculation TEXT UNIQUE, marque TEXT, modele TEXT, couleur TEXT, proprietaire_id INTEGER, notes TEXT);
+CREATE TABLE IF NOT EXISTS dossier_vehicules(dossier_id INTEGER, vehicule_id INTEGER, role TEXT, source TEXT, PRIMARY KEY(dossier_id, vehicule_id));
+CREATE INDEX IF NOT EXISTS ix_dv_veh ON dossier_vehicules(vehicule_id);
+CREATE TABLE IF NOT EXISTS pieces(id INTEGER PRIMARY KEY AUTOINCREMENT, dossier_id INTEGER, cote TEXT, type TEXT, titre TEXT, date TEXT, auteur TEXT, organisme_id INTEGER, personne_id INTEGER, contenu TEXT, origine TEXT, decision_id INTEGER, lue INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS ix_pieces_dos ON pieces(dossier_id);
+CREATE INDEX IF NOT EXISTS ix_pieces_pers ON pieces(personne_id);
+CREATE TABLE IF NOT EXISTS scelles(id INTEGER PRIMARY KEY AUTOINCREMENT, dossier_id INTEGER, numero TEXT, description TEXT, lieu TEXT, date TEXT, statut TEXT DEFAULT 'Placé sous scellé (sim.)', piece_id INTEGER);
+CREATE TABLE IF NOT EXISTS dossier_chrono(id INTEGER PRIMARY KEY AUTOINCREMENT, dossier_id INTEGER, date TEXT, libelle TEXT, source TEXT);
+CREATE INDEX IF NOT EXISTS ix_chrono ON dossier_chrono(dossier_id);
+CREATE TABLE IF NOT EXISTS decisions(id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT, dossier_id INTEGER, personne_id INTEGER, type TEXT, libelle TEXT, orientation TEXT, contexte TEXT, verifications TEXT, motivation TEXT,
+  statut TEXT DEFAULT 'Validée', etat_execution TEXT DEFAULT 'Exécutée', echeance_effet TEXT, resultat TEXT, date TEXT, auteur_id INTEGER, version INTEGER DEFAULT 1, remplace_id INTEGER, piece_id INTEGER, situation_avant TEXT, source TEXT DEFAULT 'Utilisateur', demande_id INTEGER);
+CREATE INDEX IF NOT EXISTS ix_dec_dos ON decisions(dossier_id);
+CREATE INDEX IF NOT EXISTS ix_dec_exec ON decisions(etat_execution);
+CREATE TABLE IF NOT EXISTS casier(id INTEGER PRIMARY KEY AUTOINCREMENT, personne_id INTEGER, dossier_id INTEGER, decision_id INTEGER, ref_externe TEXT, date TEXT, nature TEXT, juridiction TEXT, mesure TEXT, statut TEXT, source TEXT);
+CREATE INDEX IF NOT EXISTS ix_casier_pers ON casier(personne_id);
+CREATE TABLE IF NOT EXISTS detentions(id INTEGER PRIMARY KEY AUTOINCREMENT, personne_id INTEGER, dossier_id INTEGER, decision_id INTEGER, ref_externe TEXT, etablissement TEXT, regime TEXT, date_entree TEXT, date_sortie TEXT, duree_mois INTEGER, statut TEXT, motif TEXT);
+CREATE INDEX IF NOT EXISTS ix_det_pers ON detentions(personne_id);
+CREATE TABLE IF NOT EXISTS detention_hist(id INTEGER PRIMARY KEY AUTOINCREMENT, detention_id INTEGER, date TEXT, ancien_statut TEXT, nouveau_statut TEXT, decision_id INTEGER, commentaire TEXT);
+CREATE TABLE IF NOT EXISTS mail_dossiers(id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER, nom TEXT);
+ALTER TABLE dossiers ADD COLUMN faits TEXT;
+ALTER TABLE dossiers ADD COLUMN lieu_faits TEXT;
+ALTER TABLE dossiers ADD COLUMN date_faits TEXT;
+ALTER TABLE dossiers ADD COLUMN qualification TEXT;
+ALTER TABLE dossiers ADD COLUMN gravite INTEGER DEFAULT 1;
+ALTER TABLE dossiers ADD COLUMN situation TEXT;
+ALTER TABLE dossiers ADD COLUMN service_enqueteur_id INTEGER;
+ALTER TABLE dossiers ADD COLUMN date_transmission TEXT;
+ALTER TABLE messages ADD COLUMN mail_dossier_id INTEGER;
+ALTER TABLE messages ADD COLUMN ref_type TEXT;
+ALTER TABLE messages ADD COLUMN ref_id INTEGER;
+ALTER TABLE dossier_notes ADD COLUMN type TEXT DEFAULT 'Observation du procureur';
+ALTER TABLE dossier_notes ADD COLUMN auteur_ext TEXT;
+CREATE INDEX IF NOT EXISTS ix_msg_conv ON messages(conversation_id);
+INSERT OR IGNORE INTO autorisations(role,droit) VALUES('Procureur','decisions.prendre');
+INSERT OR IGNORE INTO autorisations(role,droit) VALUES('Procureur adjoint','decisions.prendre');
+";
+
     public static void Migrate()
     {
         using (var w = new DbCtx()) { try { w.Scalar("PRAGMA journal_mode=WAL;"); } catch { } }
+        long v0 = Db.Long("PRAGMA user_version");
+        if (v0 >= 1 && v0 < 2) { try { Db.Backup("avant_migration_v2"); } catch (Exception e) { Log.Error(e); } }
         using var c = new DbCtx(true);
         long v = c.Long("PRAGMA user_version");
         if (v < 1) { c.Exec(V1); c.Exec("PRAGMA user_version=1"); }
+        if (v < 2) { c.Exec(V2); c.Exec("PRAGMA user_version=2"); }
         c.Commit();
     }
 

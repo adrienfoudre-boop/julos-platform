@@ -191,12 +191,13 @@ public static class Engine
     static void Step(DbCtx c, DateTime t, double dt)
     {
         DayChange(c, t);
-        if (t.Hour != lastHour) { lastHour = t.Hour; Hourly(c, t); }
+        if (t.Hour != lastHour) { lastHour = t.Hour; Hourly(c, t); Jud.EvtDetentions(c, t); }
         Meetings(c, t);
         bool work = Ouvre(t);
         if (work)
         {
             Missions(c, t, dt);
+            Jud.Resolutions(c, t);
             Replies(c, t);
             RandomEvents(c, t, dt);
         }
@@ -420,7 +421,14 @@ public static class Engine
             long charge = c.Long("SELECT charge FROM collaborateurs WHERE id=@p0", de);
             if (charge > 70) sb.AppendLine($"Je vous signale que ma charge de travail est actuellement élevée ({charge} %).");
             sb.AppendLine("\n" + Biz.NameF(c, de));
-            Biz.Message(c, de, Me, "RE: " + U.S(r[2]), sb.ToString(), mis, U.L(r[5]));
+            long dosR = U.L(r[5]);
+            if (dosR != 0)
+            {
+                var ds = c.Rows("SELECT numero, situation, (SELECT COUNT(*) FROM pieces WHERE dossier_id=dossiers.id) FROM dossiers WHERE id=@p0", dosR);
+                if (ds.Count > 0) sb.Insert(sb.ToString().IndexOf("\n\n") + 2, $"Concernant le dossier {ds[0][0]} : situation « {ds[0][1]} », {ds[0][2]} pièce(s) versée(s).\n");
+            }
+            long rid = Biz.Message(c, de, Me, U.S(r[2]).StartsWith("RE: ") ? U.S(r[2]) : "RE: " + U.S(r[2]), sb.ToString(), mis, dosR);
+            Biz.Thread(c, rid, id);
         }
     }
 
@@ -527,8 +535,9 @@ public static class Engine
         if (Rnd.NextDouble() < P(2.5, dt) && c.Long($"SELECT COUNT(*) FROM missions WHERE statut IN {Biz.SqlActifs}") < 380) EvtMissionInterne(c, t);
         if (Rnd.NextDouble() < P(6, dt)) EvtEchange(c, t);
         if (Rnd.NextDouble() < P(0.5, dt)) EvtDifficulte(c, t);
-        if (Rnd.NextDouble() < P(0.6, dt)) EvtNouveauDossier(c, t);
-        if (Rnd.NextDouble() < P(5, dt)) EvtAvancementDossier(c, t);
+        if (Rnd.NextDouble() < P(0.3, dt)) Jud.EvtNouvelleAffaire(c, t);
+        if (Rnd.NextDouble() < P(2.2, dt)) Jud.EvtEnquete(c, t);
+        if (Rnd.NextDouble() < P(0.08, dt)) Jud.EvtDemandeMiseEnLiberte(c, t);
         if (Rnd.NextDouble() < P(0.35, dt)) EvtReunion(c, t);
         if (Rnd.NextDouble() < P(0.6, dt)) EvtAppel(c, t);
         if (Rnd.NextDouble() < P(0.4, dt)) EvtPartenaire(c, t);

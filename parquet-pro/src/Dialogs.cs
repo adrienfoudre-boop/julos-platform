@@ -136,7 +136,7 @@ public class DossierDialog : Dlg
 public class MessageDialog : Dlg
 {
     readonly List<long> ccIds = new();
-    public MessageDialog(long dest = 0, string objet = "", string corps = "", long mission = 0, long dossier = 0, IEnumerable<long> cc = null, long brouillonId = 0) : base("Nouveau message", 780, 640)
+    public MessageDialog(long dest = 0, string objet = "", string corps = "", long mission = 0, long dossier = 0, IEnumerable<long> cc = null, long brouillonId = 0, long parentId = 0) : base(parentId != 0 ? "Répondre" : "Nouveau message", 780, 640)
     {
         var cDest = Row("À *", CollabCombo(dest, "c.id<>@p0", Auth.CollabId));
         var lCc = new Label { AutoSize = false, Height = 22, ForeColor = Theme.Anthracite, Text = "(aucun)" };
@@ -169,7 +169,7 @@ public class MessageDialog : Dlg
         {
             long d = ComboId(cDest);
             if (d == 0) throw new InvalidOperationException("Veuillez choisir un destinataire dans la liste.");
-            Biz.EnvoyerMessage(c, d, string.Join(";", ccIds), tObj.Text, tCorps.Text, chk.Checked, mission, Item.Of(cDos), Item.Of(cDoc), false);
+            Biz.EnvoyerMessage(c, d, string.Join(";", ccIds), tObj.Text, tCorps.Text, chk.Checked, mission, Item.Of(cDos), Item.Of(cDoc), false, parentId);
             if (brouillonId != 0) c.Exec("DELETE FROM messages WHERE id=@p0 AND brouillon=1", brouillonId);
         }), true);
     }
@@ -535,19 +535,20 @@ public class LoginForm : Form
 public class InitForm : Form
 {
     public Exception Error;
-    public InitForm()
+    public InitForm(string titre = "Initialisation de votre organisation", Action<Action<int, string>> work = null, string detail = "20 services, 300 collaborateurs, organigramme, univers institutionnel.")
     {
-        Text = "PARQUET PRO — Premier lancement"; Width = 560; Height = 230; StartPosition = FormStartPosition.CenterScreen; FormBorderStyle = FormBorderStyle.FixedDialog; ControlBox = false; Font = Theme.F; BackColor = Color.White;
-        var head = new Label { Dock = DockStyle.Top, Height = 54, Text = "  Initialisation de votre organisation", Font = Theme.FT, ForeColor = Color.White, BackColor = Theme.Navy, TextAlign = ContentAlignment.MiddleLeft };
-        var lbl = new Label { Location = new Point(24, 76), Width = 500, Text = "Création de la base de données…" };
-        var pb = new ProgressBar { Location = new Point(24, 104), Width = 500, Height = 20 };
-        var l2 = new Label { Location = new Point(24, 136), Width = 500, ForeColor = Color.Gray, Text = "20 services, 300 collaborateurs, organigramme, univers institutionnel." };
+        work ??= Seed.Run;
+        Text = "PARQUET PRO"; Width = 560; Height = 230; StartPosition = FormStartPosition.CenterScreen; FormBorderStyle = FormBorderStyle.FixedDialog; ControlBox = false; Font = Theme.F; BackColor = Color.White;
+        var head = new Label { Dock = DockStyle.Top, Height = 54, Text = "  " + titre, Font = Theme.FT, ForeColor = Color.White, BackColor = Theme.Navy, TextAlign = ContentAlignment.MiddleLeft };
+        var lbl = new Label { Location = new Point(24, 76), Width = 500, Text = "Préparation…" };
+        var pb = new ProgressBar { Location = new Point(24, 104), Width = 500, Height = 20, Style = ProgressBarStyle.Marquee };
+        var l2 = new Label { Location = new Point(24, 136), Width = 500, Height = 40, ForeColor = Color.Gray, Text = detail };
         Controls.AddRange(new Control[] { head, lbl, pb, l2 });
         Shown += async (s, e) =>
         {
             try
             {
-                await Task.Run(() => Seed.Run((p, t) => BeginInvoke(() => { pb.Value = Math.Min(100, p); lbl.Text = t; })));
+                await Task.Run(() => work((p, t) => BeginInvoke(() => { if (pb.Style != ProgressBarStyle.Continuous && p > 0) pb.Style = ProgressBarStyle.Continuous; if (p > 0) pb.Value = Math.Min(100, p); lbl.Text = t; })));
             }
             catch (Exception ex) { Error = ex; }
             Close();

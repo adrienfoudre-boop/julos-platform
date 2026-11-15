@@ -46,7 +46,7 @@ public static class Auth
     public static long UserId, CollabId = 1;
     public static string Login = "", Role = "Procureur";
     static HashSet<string> droits = new();
-    public static readonly string[] Droits = { "missions.creer", "missions.valider", "dossiers.gerer", "messages.envoyer", "agenda.gerer", "documents.gerer", "personnel.modifier", "telephonie", "admin", "moteur.piloter" };
+    public static readonly string[] Droits = { "missions.creer", "missions.valider", "dossiers.gerer", "messages.envoyer", "agenda.gerer", "documents.gerer", "personnel.modifier", "telephonie", "admin", "moteur.piloter", "decisions.prendre" };
     public static readonly string[] Roles = { "Procureur", "Procureur adjoint", "Administrateur", "Consultation" };
 
     public static bool Connect(string login, string mdp)
@@ -90,17 +90,18 @@ public static class Theme
 
 public static class Ui
 {
+    public static bool Silent;
     public static bool Try(Action a)
     {
         try { a(); return true; }
-        catch (UnauthorizedAccessException e) { MessageBox.Show(e.Message, "Autorisation refusée", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-        catch (InvalidOperationException e) { MessageBox.Show(e.Message, "Opération impossible", MessageBoxButtons.OK, MessageBoxIcon.Information); }
-        catch (Exception e) { Log.Error(e); MessageBox.Show("Une erreur est survenue et a été journalisée :\n" + e.Message, "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (UnauthorizedAccessException e) { if (Silent) Log.Warn("Refus : " + e.Message); else MessageBox.Show(e.Message, "Autorisation refusée", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        catch (InvalidOperationException e) { if (Silent) Log.Warn("Opération impossible : " + e.Message); else MessageBox.Show(e.Message, "Opération impossible", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        catch (Exception e) { Log.Error(e); if (!Silent) MessageBox.Show("Une erreur est survenue et a été journalisée :\n" + e.Message, "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         return false;
     }
 
-    public static void Info(string m) => MessageBox.Show(m, "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    public static bool Confirm(string m) => MessageBox.Show(m, "PARQUET PRO — Confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+    public static void Info(string m) { if (Silent) Log.Info("[Info] " + m); else MessageBox.Show(m, "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+    public static bool Confirm(string m) => !Silent && MessageBox.Show(m, "PARQUET PRO — Confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
 
     public static Button Btn(string text, EventHandler click, int w = 0)
     {

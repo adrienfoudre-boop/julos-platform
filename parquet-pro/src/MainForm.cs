@@ -45,41 +45,47 @@ public class MainForm : Form
     readonly ToolStripButton bPlay, bPause;
     readonly System.Windows.Forms.Timer uiTimer = new() { Interval = 1000 };
     long lastVersion = -1; DateTime lastRefresh = DateTime.MinValue;
+    Action layoutHeader;
     string current;
     Splitter rightSplit;
 
-    public record ModDef(string Name, string Icon, Func<Module> Make);
+    public record ModDef(string Name, string Icon, string Section, Func<Module> Make);
     public static readonly ModDef[] Defs =
     {
-        new("Mon cabinet", "⌂", () => new CabinetModule()),
-        new("Délégations", "✎", () => new DelegationsModule()),
-        new("Dossiers", "▤", () => new DossiersModule()),
-        new("Messagerie", "✉", () => new MessagerieModule()),
-        new("Téléphonie", "☎", () => new TelephonieModule()),
-        new("Agenda", "▦", () => new AgendaModule()),
-        new("Organigramme", "☷", () => new OrganisationModule()),
-        new("Personnel", "☺", () => new PersonnelModule()),
-        new("Univers institutionnel", "⚖", () => new UniversModule()),
-        new("Documents", "❐", () => new DocumentsModule()),
-        new("Statistiques", "∑", () => new StatsModule()),
-        new("Notifications", "⚑", () => new NotificationsModule()),
-        new("Archives", "▣", () => new ArchivesModule()),
-        new("Journal", "≡", () => new JournalModule()),
-        new("Assistant", "✦", () => new AssistantModule()),
-        new("Administration", "⚙", () => new AdminModule()),
+        new("Cabinet du procureur", "cabinet", "CABINET", () => new CabinetModule()),
+        new("Décisions", "decision", "CABINET", () => new DecisionsModule()),
+        new("Messagerie", "mail", "CABINET", () => new MessagerieModule()),
+        new("Téléphonie", "phone", "CABINET", () => new TelephonieModule()),
+        new("Agenda", "agenda", "CABINET", () => new AgendaModule()),
+        new("Dossiers", "dossier", "AFFAIRES", () => new DossiersModule()),
+        new("Enquêtes", "enquete", "AFFAIRES", () => new EnquetesModule()),
+        new("Fichiers de recherche", "recherche", "AFFAIRES", () => new RechercheModule()),
+        new("Personnes", "personne", "AFFAIRES", () => new PersonnesModule()),
+        new("Casier judiciaire", "casier", "AFFAIRES", () => new CasierModule()),
+        new("Personnes détenues", "detenu", "AFFAIRES", () => new DetenusModule()),
+        new("Services et collaborateurs", "services", "ORGANISATION", () => new ServicesModule()),
+        new("Délégations", "delegation", "ORGANISATION", () => new DelegationsModule()),
+        new("Organismes", "organisme", "ORGANISATION", () => new UniversModule()),
+        new("Documents et impressions", "document", "PILOTAGE", () => new DocumentsModule()),
+        new("Statistiques", "stats", "PILOTAGE", () => new StatsModule()),
+        new("Archives", "archive", "PILOTAGE", () => new ArchivesModule()),
+        new("Notifications", "notif", "PILOTAGE", () => new NotificationsModule()),
+        new("Journal", "journal", "PILOTAGE", () => new JournalModule()),
+        new("Assistant", "assistant", "PILOTAGE", () => new AssistantModule()),
+        new("Administration", "admin", "PILOTAGE", () => new AdminModule()),
     };
 
     // ------------------------------------------------------------ raccourcis personnalisables
     public static readonly (string name, Keys def, Action<MainForm> act)[] Actions =
     {
-        ("Mon cabinet", Keys.Control | Keys.D1, f => f.ShowModule("Mon cabinet")),
-        ("Délégations", Keys.Control | Keys.D2, f => f.ShowModule("Délégations")),
+        ("Cabinet du procureur", Keys.Control | Keys.D1, f => f.ShowModule("Cabinet du procureur")),
+        ("Décisions", Keys.Control | Keys.D2, f => f.ShowModule("Décisions")),
         ("Dossiers", Keys.Control | Keys.D3, f => f.ShowModule("Dossiers")),
         ("Messagerie", Keys.Control | Keys.D4, f => f.ShowModule("Messagerie")),
-        ("Téléphonie", Keys.Control | Keys.D5, f => f.ShowModule("Téléphonie")),
+        ("Fichiers de recherche", Keys.Control | Keys.D5, f => f.ShowModule("Fichiers de recherche")),
         ("Agenda", Keys.Control | Keys.D6, f => f.ShowModule("Agenda")),
-        ("Organigramme", Keys.Control | Keys.D7, f => f.ShowModule("Organigramme")),
-        ("Personnel", Keys.Control | Keys.D8, f => f.ShowModule("Personnel")),
+        ("Enquêtes", Keys.Control | Keys.D7, f => f.ShowModule("Enquêtes")),
+        ("Personnes détenues", Keys.Control | Keys.D8, f => f.ShowModule("Personnes détenues")),
         ("Statistiques", Keys.Control | Keys.D9, f => f.ShowModule("Statistiques")),
         ("Nouvelle délégation", Keys.Control | Keys.D, f => f.NewMission()),
         ("Nouveau message", Keys.Control | Keys.M, f => f.NewMessage()),
@@ -118,20 +124,25 @@ public class MainForm : Form
         lSim.ForeColor = Color.White; lSim.Font = new Font("Segoe UI Semibold", 12f); lSim.AutoSize = true; lSim.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         lReel.ForeColor = Color.FromArgb(160, 185, 215); lReel.AutoSize = true; lReel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         lUser.ForeColor = Color.White; lUser.AutoSize = true; lUser.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        bNotif = new Button { Text = "⚑ 0", ForeColor = Color.White, BackColor = Theme.Blue, FlatStyle = FlatStyle.Flat, Width = 70, Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right, Cursor = Cursors.Hand };
+        bNotif = new Button { Text = " 0", Image = Icons.Get("notif", 18, Color.White), TextImageRelation = TextImageRelation.ImageBeforeText, ForeColor = Color.White, BackColor = Theme.Blue, FlatStyle = FlatStyle.Flat, Width = 70, Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right, Cursor = Cursors.Hand };
         bNotif.FlatAppearance.BorderSize = 0;
         bNotif.Click += (s, e) => ShowModule("Notifications");
-        var bSet = new Button { Text = "⚙", ForeColor = Color.White, BackColor = Theme.Blue, FlatStyle = FlatStyle.Flat, Width = 36, Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right, Cursor = Cursors.Hand };
+        var bSet = new Button { Text = "", Image = Icons.Get("admin", 18, Color.White), ForeColor = Color.White, BackColor = Theme.Blue, FlatStyle = FlatStyle.Flat, Width = 36, Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right, Cursor = Cursors.Hand };
         bSet.FlatAppearance.BorderSize = 0;
         bSet.Click += (s, e) => ShowModule("Administration");
-        header.Controls.AddRange(new Control[] { logo, sub, lSim, lReel, lUser, bNotif, bSet });
-        header.Resize += (s, e) =>
+        var gsearch = new TextBox { Width = 300, Location = new Point(520, 15), PlaceholderText = "Rechercher : nom, immatriculation, n° de dossier… (Entrée)", Font = new Font("Segoe UI", 10f), BorderStyle = BorderStyle.FixedSingle };
+        gsearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter && gsearch.Text.Trim() != "") { e.SuppressKeyPress = true; Get<RechercheModule>("Fichiers de recherche")?.Lancer(gsearch.Text); } };
+        var gIcon = new PictureBox { Image = Icons.Get("recherche", 20, Color.White), Location = new Point(492, 16), Size = new Size(22, 22), SizeMode = PictureBoxSizeMode.CenterImage };
+        header.Controls.AddRange(new Control[] { logo, sub, gIcon, gsearch, lSim, lReel, lUser, bNotif, bSet });
+        sub.Visible = false;
+        layoutHeader = () =>
         {
             bSet.Location = new Point(header.Width - 50, 11); bNotif.Location = new Point(header.Width - 128, 11);
-            lUser.Location = new Point(header.Width - 140 - lUser.Width, 19);
-            lSim.Location = new Point(header.Width - 170 - lUser.Width - lSim.Width, 8);
-            lReel.Location = new Point(header.Width - 170 - lUser.Width - lReel.Width, 32);
+            lUser.Location = new Point(header.Width - 140 - lUser.PreferredWidth, 19);
+            int x = header.Width - 170 - lUser.PreferredWidth - Math.Max(lSim.PreferredWidth, lReel.PreferredWidth);
+            lSim.Location = new Point(x, 8); lReel.Location = new Point(x, 32);
         };
+        header.Resize += (s, e) => layoutHeader();
 
         // ---- menus
         var menu = new MenuStrip { BackColor = Color.White, Font = Theme.F };
@@ -141,12 +152,13 @@ public class MainForm : Form
             I("Ouvrir le dossier des exports", () => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Db.ExportDir) { UseShellExecute = true })),
             new ToolStripSeparator(), I("Changer d'utilisateur…", () => app.Relogin()), I("Réduire en tâche de fond", () => { Hide(); app.Balloon("PARQUET PRO", "Le moteur continue de fonctionner."); }),
             new ToolStripSeparator(), I("Quitter", () => { if (Ui.Confirm("Quitter PARQUET PRO ? Le moteur de simulation sera arrêté et l'état sauvegardé.")) app.ExitApp(); })));
-        menu.Items.Add(M("&Cabinet", I("Mon cabinet", () => ShowModule("Mon cabinet")), I("Mes délégations", () => ShowModule("Délégations")), I("Dossiers", () => ShowModule("Dossiers")),
+        menu.Items.Add(M("&Cabinet", I("Cabinet du procureur", () => ShowModule("Cabinet du procureur")), I("Décisions", () => ShowModule("Décisions")), I("Dossiers", () => ShowModule("Dossiers")),
             new ToolStripSeparator(), I("Nouvelle délégation…", NewMission, KeyOf("Nouvelle délégation")), I("Nouveau dossier…", () => { using var d = new DossierDialog(); d.ShowDialog(this); RefreshAll(true); })));
         menu.Items.Add(M("C&ommunication", I("Messagerie", () => ShowModule("Messagerie")), I("Téléphonie", () => ShowModule("Téléphonie")), I("Agenda et réunions", () => ShowModule("Agenda")), I("Notifications", () => ShowModule("Notifications")),
             new ToolStripSeparator(), I("Nouveau message…", NewMessage, KeyOf("Nouveau message")), I("Nouvelle réunion…", NewReunion, KeyOf("Nouvelle réunion")), I("Appel sortant…", () => { using var d = new AppelDialog(); d.ShowDialog(this); })));
-        menu.Items.Add(M("&Organisation", I("Organigramme", () => ShowModule("Organigramme")), I("Personnel et ressources humaines", () => ShowModule("Personnel")), I("Univers institutionnel", () => ShowModule("Univers institutionnel"))));
-        menu.Items.Add(M("&Documents", I("Bibliothèque documentaire", () => ShowModule("Documents")), I("Archives", () => ShowModule("Archives")), I("Journal chronologique", () => ShowModule("Journal")),
+        menu.Items.Add(M("A&ffaires", I("Dossiers", () => ShowModule("Dossiers")), I("Enquêtes", () => ShowModule("Enquêtes")), I("Décisions", () => ShowModule("Décisions")), I("Fichiers de recherche", () => ShowModule("Fichiers de recherche")), I("Personnes", () => ShowModule("Personnes")), I("Casier judiciaire", () => ShowModule("Casier judiciaire")), I("Personnes détenues", () => ShowModule("Personnes détenues"))));
+        menu.Items.Add(M("&Organisation", I("Services et collaborateurs", () => ShowModule("Services et collaborateurs")), I("Délégations", () => ShowModule("Délégations")), I("Organismes", () => ShowModule("Organismes"))));
+        menu.Items.Add(M("&Documents", I("Documents et impressions", () => ShowModule("Documents et impressions")), I("Archives", () => ShowModule("Archives")), I("Journal chronologique", () => ShowModule("Journal")),
             I("Nouveau document…", () => { using var d = new DocumentDialog(); d.ShowDialog(this); })));
         menu.Items.Add(M("&Pilotage", I("Statistiques et tableaux de bord", () => ShowModule("Statistiques")), I("Synthèse de situation", () => Ui.ShowText("Synthèse de situation", Db.Q(c => Biz.Synthese(c)), this))));
         var mSim = M("&Simulation", I("Lecture", () => SetRun(true)), I("Pause", () => SetRun(false)), I("Pause / reprise", TogglePause, KeyOf("Pause / reprise du moteur")), new ToolStripSeparator());
@@ -163,8 +175,9 @@ public class MainForm : Form
         // ---- ruban
         var ribbon = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, BackColor = Theme.Light, Padding = new Padding(6, 4, 6, 4), ImageScalingSize = new Size(20, 20), Font = Theme.F, RenderMode = ToolStripRenderMode.System };
         ToolStripLabel G(string t) => new(t) { ForeColor = Color.Gray, Font = new Font("Segoe UI", 7.5f) };
-        ToolStripButton B(string t, Action a, string tip = null) => new(t, null, (s, e) => Ui.Try(a)) { ToolTipText = tip ?? t, ForeColor = Theme.Navy, Margin = new Padding(2, 1, 2, 1) };
+        ToolStripButton B(string t, Action a, string tip = null) { var k = t.Split(' ')[0]; var key = k switch { "✎" => "delegation", "▤" => "dossier", "✉" => "mail", "▦" => "agenda", "☎" => "phone", "❐" => "document", "▶" => "play", "❚❚" => "pause", "⏭" => "forward", "⟳" => "refresh", "◧" => "view", "✦" => "assistant", "⚖" => "decision", "∑" => "stats", "≡" => "journal", "+1" => "history", _ => null }; var txt = key != null && k != "+1" ? t[(k.Length + 1)..] : t; return new ToolStripButton(txt, key != null ? Icons.Get(key, 18, Theme.Blue) : null, (s, e) => Ui.Try(a)) { ToolTipText = tip ?? txt, ForeColor = Theme.Navy, Margin = new Padding(2, 1, 2, 1), ImageScaling = ToolStripItemImageScaling.None }; }
         ribbon.Items.Add(G("CABINET"));
+        ribbon.Items.Add(B("⚖ Décider", () => ShowModule("Décisions"), "Dossiers en attente de décision"));
         ribbon.Items.Add(B("✎ Délégation", NewMission, "Nouvelle délégation (Ctrl+D)"));
         ribbon.Items.Add(B("▤ Dossier", () => { using var d = new DossierDialog(); d.ShowDialog(this); RefreshAll(true); }));
         ribbon.Items.Add(B("✉ Message", NewMessage, "Nouveau message (Ctrl+M)"));
@@ -185,7 +198,7 @@ public class MainForm : Form
         ribbon.Items.Add(G("AFFICHAGE"));
         ribbon.Items.Add(B("⟳ Actualiser", () => RefreshAll(true), "F5"));
         ribbon.Items.Add(B("◧ Panneau droit", ToggleRight));
-        ribbon.Items.Add(B("✦ Assistant", () => ShowModule("Assistant")));
+        ribbon.Items.Add(B("◧ Recherche", () => ShowModule("Fichiers de recherche")));
         ribbon.Items.Add(new ToolStripSeparator());
         ribbon.Items.Add(G("PILOTAGE"));
         ribbon.Items.Add(B("∑ Statistiques", () => ShowModule("Statistiques")));
@@ -228,7 +241,7 @@ public class MainForm : Form
 
         uiTimer.Tick += (s, e) => OnTimer();
         uiTimer.Start();
-        Shown += (s, e) => { ShowModule("Mon cabinet"); RefreshAll(true); header.PerformLayout(); OnResizeHeader(header); };
+        Shown += (s, e) => { ShowModule("Cabinet du procureur"); RefreshAll(true); header.PerformLayout(); OnResizeHeader(header); };
         FormClosing += OnClosing;
     }
 
@@ -268,15 +281,25 @@ public class MainForm : Form
         navFav.Controls.Clear(); navAll.Controls.Clear(); navButtons.Clear();
         var fav = Favoris();
         foreach (var f in fav) navFav.Controls.Add(NavBtn(Defs.First(d => d.Name == f), true));
-        foreach (var d in Defs) navAll.Controls.Add(NavBtn(d, false));
+        string sec = null;
+        foreach (var d in Defs)
+        {
+            if (d.Section != sec)
+            {
+                sec = d.Section;
+                navAll.Controls.Add(new Label { Text = "  " + sec, Width = 212, Height = 26, ForeColor = Color.FromArgb(140, 165, 200), Font = new Font("Segoe UI", 8f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft, Margin = new Padding(0) });
+            }
+            navAll.Controls.Add(NavBtn(d, false));
+        }
     }
 
     Button NavBtn(ModDef d, bool fav)
     {
         var b = new Button
         {
-            Text = $"  {d.Icon}   {d.Name}", Width = 212, Height = 32, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Theme.Navy, TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 9.5f), Margin = new Padding(0), Cursor = Cursors.Hand, Tag = d.Name
+            Text = "   " + d.Name, Width = 212, Height = 32, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Theme.Navy, TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe UI", 9.5f), Margin = new Padding(0), Cursor = Cursors.Hand, Tag = d.Name, Image = Icons.Get(d.Icon, 18, Color.FromArgb(200, 215, 235)), ImageAlign = ContentAlignment.MiddleLeft,
+            TextImageRelation = TextImageRelation.ImageBeforeText, Padding = new Padding(10, 0, 0, 0)
         };
         b.FlatAppearance.BorderSize = 0; b.FlatAppearance.MouseOverBackColor = Theme.Blue;
         b.Click += (s, e) => ShowModule(d.Name);
@@ -381,15 +404,35 @@ public class MainForm : Form
         switch (type)
         {
             case "mission": new MissionView(id).Show(this); break;
-            case "dossier": Get<DossiersModule>("Dossiers")?.Focus(id); break;
+            case "dossier": DossierWindow.Open(id); break;
             case "message": MessageViewer.Open(this, id); break;
             case "reunion": { using var d = new ReunionDialog(id); d.ShowDialog(this); } break;
             case "appel": Get<TelephonieModule>("Téléphonie"); break;
             case "document": { using var d = new DocumentDialog(id); d.ShowDialog(this); } break;
-            case "demande": { using var d = new DemandeDialog(id); d.ShowDialog(this); } break;
+            case "demande":
+            {
+                var dm = Db.Rows("SELECT type, IFNULL(ref_id,0) FROM demandes WHERE id=@p0", id);
+                if (dm.Count > 0 && U.S(dm[0][0]) == "Demande de mise en liberté")
+                {
+                    var det = Db.Rows("SELECT IFNULL(dossier_id,0), personne_id FROM detentions WHERE id=@p0", U.L(dm[0][1]));
+                    if (det.Count > 0 && U.L(det[0][0]) != 0) { using var w = new DecisionWizard(U.L(det[0][0]), "DML", U.L(det[0][1]), 0); w.ShowDialog(this); break; }
+                }
+                using var d = new DemandeDialog(id); d.ShowDialog(this);
+            }
+                break;
             case "collaborateur": new FicheCollab(id).Show(this); break;
-            case "organisme": Get<UniversModule>("Univers institutionnel")?.Focus(id); break;
-            case "module": ShowModule("Mon cabinet"); break;
+            case "organisme": Get<UniversModule>("Organismes")?.Focus(id); break;
+            case "personne": PersonneWindow.Open(this, id); break;
+            case "decision": { using var v = new DecisionView(id); v.ShowDialog(this); } break;
+            case "piece": PieceViewer.Open(this, id); break;
+            case "vehicule":
+            {
+                var im = Db.Str("SELECT immatriculation FROM vehicules WHERE id=@p0", id);
+                Get<RechercheModule>("Fichiers de recherche")?.Lancer(im ?? "");
+            }
+                break;
+            case "detention": Get<DetenusModule>("Personnes détenues"); break;
+            case "module": ShowModule("Cabinet du procureur"); break;
             default: ShowModule("Journal"); break;
         }
         RefreshAll(true);
@@ -403,6 +446,7 @@ public class MainForm : Form
             var n = Engine.Now;
             lSim.Text = "Temps simulé : " + n.ToString("ddd dd/MM/yyyy HH:mm", U.Fr);
             lReel.Text = "Heure réelle : " + DateTime.Now.ToString("HH:mm:ss");
+            layoutHeader?.Invoke();
             sMoteur.Text = "Moteur : " + Engine.Etat;
             sMoteur.ForeColor = Engine.Running ? Color.LightGreen : Color.Orange;
             sVitesse.Text = "Vitesse : " + (Engine.Running ? Engine.VitesseLabel(Engine.Speed) : "pause");
@@ -439,14 +483,14 @@ public class MainForm : Form
             (SELECT COUNT(*) FROM appels WHERE rappel=1),
             (SELECT COUNT(*) FROM reunions r JOIN reunion_participants p ON p.reunion_id=r.id WHERE p.collab_id=@p0 AND r.statut='Proposée'),
             (SELECT COUNT(*) FROM demandes WHERE statut='En attente')", me)[0];
-        bNotif.Text = "⚑ " + counts[0];
+        bNotif.Text = " " + counts[0];
         bNotif.BackColor = U.L(counts[0]) > 0 ? Theme.Accent : Theme.Blue;
-        var badge = new Dictionary<string, long> { ["Notifications"] = U.L(counts[0]), ["Messagerie"] = U.L(counts[1]), ["Délégations"] = U.L(counts[2]), ["Téléphonie"] = U.L(counts[3]), ["Agenda"] = U.L(counts[4]), ["Mon cabinet"] = U.L(counts[5]) + U.L(counts[2]) };
+        var badge = new Dictionary<string, long> { ["Notifications"] = U.L(counts[0]), ["Messagerie"] = U.L(counts[1]), ["Délégations"] = U.L(counts[2]), ["Téléphonie"] = U.L(counts[3]), ["Agenda"] = U.L(counts[4]), ["Décisions"] = Db.Long("SELECT COUNT(*) FROM dossiers WHERE situation='En attente de décision'") + U.L(counts[5]), ["Cabinet du procureur"] = U.L(counts[2]) };
         foreach (var kv in navButtons)
         {
             var name = (string)kv.Value.Tag;
             var d = Defs.First(x => x.Name == name);
-            kv.Value.Text = $"  {d.Icon}   {d.Name}" + (badge.TryGetValue(name, out var c) && c > 0 ? $"  ({c})" : "");
+            kv.Value.Text = "   " + d.Name + (badge.TryGetValue(name, out var c) && c > 0 ? $"  ({c})" : "");
         }
     }
 
@@ -477,7 +521,7 @@ public class MainForm : Form
         Db.Exec("UPDATE notifications SET affichee=1 WHERE affichee=0 AND id<=@p0", rows[^1][0]);
         if (Db.Get("popup_notifs", "1") != "1") return;
         var show = rows.Where(r => U.S(r[3]) == "Haute").TakeLast(3).ToList();
-        if (show.Count == 0) show = rows.TakeLast(1).ToList();
+        if (show.Count == 0) return;
         if (!Visible) { app.Balloon(U.S(show[^1][1]), U.S(show[^1][2])); return; }
         foreach (var r in show) Toast(U.S(r[1]), U.S(r[2]), U.S(r[4]), U.L(r[5]), U.S(r[3]) == "Haute");
     }

@@ -194,6 +194,10 @@ public static class Biz
         string num = Seq(c, "DOS");
         long id = c.Insert(@"INSERT INTO dossiers(numero,intitule,categorie,resume,service_id,referent_id,organisme_id,personnes,statut,priorite,avancement,date_ouverture,echeance)
             VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,'Ouvert',@p8,0,@p9,@p10)", num, intitule, cat, resume, svc, referent, org == 0 ? null : org, personnes, prio, U.D(Engine.Now), U.D(ech));
+        long enq = org != 0 && c.Str("SELECT categorie FROM organismes WHERE id=@p0", org) == "Service d'enquête" ? org : c.Long("SELECT id FROM organismes WHERE categorie='Service d''enquête' ORDER BY RANDOM() LIMIT 1");
+        c.Exec("UPDATE dossiers SET faits=@p1, qualification=@p2, gravite=@p3, situation='Enquête en cours', service_enqueteur_id=@p4, date_transmission=@p5, date_faits=@p5 WHERE id=@p0",
+            id, string.IsNullOrWhiteSpace(resume) ? "Faits à préciser par le service enquêteur." : resume, intitule + " (qualification simulée)", prio == "Haute" ? 3 : prio == "Normale" ? 2 : 1, enq, U.D(Engine.Now));
+        c.Exec("INSERT INTO dossier_chrono(dossier_id,date,libelle,source) VALUES(@p0,@p1,'Ouverture de la procédure par le parquet','Parquet')", id, U.D(Engine.Now));
         DHist(c, id, Auth.CollabId, "Ouverture du dossier par " + Name(c, Auth.CollabId));
         Event(c, "Nouveau dossier", Name(c, Auth.CollabId), Auth.CollabId, $"Création du dossier {num} — {intitule}", "dossier", id, svc: svc);
         if (referent != 0) Message(c, Auth.CollabId, referent, $"Dossier {num} — vous êtes désigné référent", $"Vous êtes désigné référent du dossier {num} : {intitule}.", 0, id, categorie: "Dossier");
@@ -248,7 +252,15 @@ public static class Biz
     }
 
     // ------------------------------------------------------------ messagerie
-    public static long EnvoyerMessage(DbCtx c, long dest, string cc, string objet, string corps, bool important, long missionId, long dossierId, long docId, bool brouillon)
+    public static void Thread(DbCtx c, long msgId, long parentId)
+    {
+        if (parentId == 0) return;
+        long conv = c.Long("SELECT IFNULL(conversation_id, id) FROM messages WHERE id=@p0", parentId);
+        if (conv == 0) return;
+        c.Exec("UPDATE messages SET conversation_id=@p1 WHERE id IN (@p0, @p2) OR conversation_id IS NULL AND id=@p1", msgId, conv, parentId);
+    }
+
+    public static long EnvoyerMessage(DbCtx c, long dest, string cc, string objet, string corps, bool important, long missionId, long dossierId, long docId, bool brouillon, long parentId = 0)
     {
         Auth.Check("messages.envoyer");
         if (!brouillon && dest == 0) throw new InvalidOperationException("Veuillez choisir un destinataire.");
@@ -263,6 +275,7 @@ public static class Biz
                     c.Exec(@"INSERT INTO messages(date,exp_id,dest_id,cc,objet,corps,important,mission_id,dossier_id,categorie,etat_exp) VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,'Copie','masque')",
                         U.D(Engine.Now), Auth.CollabId, ccId, cc, objet, corps, important, missionId == 0 ? null : missionId, dossierId == 0 ? null : dossierId);
         }
+        if (!brouillon) Thread(c, id, parentId);
         if (!brouillon) Event(c, "Message envoyé", Name(c, Auth.CollabId), Auth.CollabId, $"Message « {objet} » à {Name(c, dest)}", "message", id);
         return id;
     }

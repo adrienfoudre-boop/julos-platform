@@ -10,10 +10,11 @@ static class Program
     static void Main(string[] args)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += (s, e) => { Log.Error(e.Exception); MessageBox.Show("Erreur inattendue (journalisée) :\n" + e.Exception.Message, "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Error); };
+        Application.ThreadException += (s, e) => { Log.Error(e.Exception); if (!Ui.Silent) MessageBox.Show("Erreur inattendue (journalisée) :\n" + e.Exception.Message, "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Error); };
         AppDomain.CurrentDomain.UnhandledException += (s, e) => { if (e.ExceptionObject is Exception ex) Log.Error(ex); };
         TaskScheduler.UnobservedTaskException += (s, e) => { Log.Error(e.Exception); e.SetObserved(); };
         ApplicationConfiguration.Initialize();
+        if (args.Contains("--selftest")) Ui.Silent = true;
         mutex = new Mutex(true, "ParquetPro_Instance_Unique", out bool first);
         if (!first) { MessageBox.Show("PARQUET PRO est déjà en cours d'exécution (voir la zone de notification).", "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         try
@@ -34,6 +35,19 @@ static class Program
             }
             Theme.RowHeight = Db.Get("densite", "Normale") switch { "Compacte" => 20, "Confortable" => 30, _ => 24 };
             Engine.Load();
+            if (Db.Get("jud_v2", "0") != "1")
+            {
+                using var up = new InitForm("Mise à niveau PARQUET PRO 2.0", report => Jud.Backfill(t => report(0, t)),
+                    "Création de l'univers judiciaire : personnes, pièces d'enquête, décisions, casier et détention. Vos données existantes sont conservées (sauvegarde préalable effectuée).");
+                up.ShowDialog();
+                if (up.Error != null)
+                {
+                    Log.Error(up.Error);
+                    MessageBox.Show("Échec de la mise à niveau : " + up.Error.Message + "\n\nVos données n'ont pas été modifiées (transaction annulée).", "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                Log.Info("Mise à niveau v2 effectuée.");
+            }
         }
         catch (Exception ex)
         {
@@ -41,6 +55,7 @@ static class Program
             MessageBox.Show("Impossible d'ouvrir la base de données :\n" + ex.Message + "\n\nDossier : " + Db.Dir, "PARQUET PRO", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+        if (args.Contains("--selftest")) { SelfTest.Run(); return; }
         Application.Run(new AppCtx(args.Contains("--tray")));
         GC.KeepAlive(mutex);
     }

@@ -2,93 +2,6 @@ using System.Data;
 
 namespace ParquetPro;
 
-// ============================================================ MON CABINET
-public class CabinetModule : Module
-{
-    public override string Titre => "Mon cabinet";
-    readonly Kpi kMsg, kRap, kDem, kDel, kRet, kReu, kDos, kAl;
-    readonly GridPanel gMsg, gRap, gDem, gDel, gReu, gSyn;
-    readonly Label lSynth = new() { Dock = DockStyle.Fill, Padding = new Padding(8), Font = new Font("Consolas", 9f), ForeColor = Theme.Anthracite };
-
-    public CabinetModule()
-    {
-        long me = Auth.CollabId;
-        long adj = long.Parse(Db.Get("adjoint_id", "0")), secp = long.Parse(Db.Get("secp_id", "0")), sg = long.Parse(Db.Get("sg_id", "0"));
-        var kp = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 88, Padding = new Padding(4), WrapContents = false, AutoScroll = true };
-        kMsg = new Kpi("Messages non lus", Theme.Accent); kRap = new Kpi("Rapports à décider", Theme.Orange); kDem = new Kpi("Demandes en attente", Theme.Orange); kDel = new Kpi("Délégations actives", Theme.Blue);
-        kRet = new Kpi("Missions en retard", Theme.Red); kReu = new Kpi("Réunions aujourd'hui", Theme.Green); kDos = new Kpi("Dossiers prioritaires", Theme.Palette[3]); kAl = new Kpi("Alertes non lues", Theme.Red);
-        kMsg.Click += (s, e) => MainForm.Instance.ShowModule("Messagerie"); kRap.Click += (s, e) => MainForm.Instance.ShowModule("Délégations"); kDel.Click += (s, e) => MainForm.Instance.ShowModule("Délégations");
-        kReu.Click += (s, e) => MainForm.Instance.ShowModule("Agenda"); kAl.Click += (s, e) => MainForm.Instance.ShowModule("Notifications"); kDos.Click += (s, e) => MainForm.Instance.ShowModule("Dossiers");
-        kp.Controls.AddRange(new Control[] { kMsg, kRap, kDem, kDel, kRet, kReu, kDos, kAl });
-
-        var bar = Ui.Bar(
-            Ui.PrimaryBtn("✎ Nouvelle délégation", (s, e) => { MainForm.Instance.NewMission(); }),
-            Ui.Btn("Instruction au procureur adjoint", (s, e) => { using var d = new MissionDialog(adj); if (d.ShowDialog() == DialogResult.OK) RefreshData(); }),
-            Ui.Btn("Demander une synthèse à l'adjoint", (s, e) => Ui.Try(() =>
-            {
-                Auth.Check("missions.creer");
-                Db.Tx(c => Biz.CreerMission(c, Auth.CollabId, adj, $"Synthèse de situation des services — {Engine.Now:dd/MM HH:mm}", "Établir une synthèse consolidée de la situation des services.", "Haute", Engine.Now.AddDays(1).Date.AddHours(17), "Consolider les retours des chefs de service.", "Interne", 0, 0, 0, null, "Utilisateur"));
-                Ui.Info("Mission de synthèse confiée au procureur adjoint."); RefreshData();
-            })),
-            Ui.Btn("Message au secrétaire particulier", (s, e) => { using var d = new MessageDialog(secp); d.ShowDialog(); }),
-            Ui.Btn("Message au secrétaire général", (s, e) => { using var d = new MessageDialog(sg); d.ShowDialog(); }),
-            Ui.Btn("Convoquer une réunion de direction", (s, e) =>
-            {
-                using var d = new ReunionDialog(0, Engine.Now.Date.AddDays(1).AddHours(9));
-                d.ShowDialog(); RefreshData();
-            }),
-            Ui.Btn("Synthèse de situation", (s, e) => Ui.ShowText("Synthèse de situation", Db.Q(c => Biz.Synthese(c)))));
-
-        gMsg = new GridPanel("cab_msg") { PageSize = 50, Loader = (q, o, l) => Db.Table(@"SELECT id, lu AS 'Lu', important AS '!', substr(date,6,11) AS 'Date', IFNULL((SELECT prenom||' '||nom FROM collaborateurs WHERE id=exp_id), exp_ext) AS 'De', objet AS 'Objet'
-            FROM messages WHERE dest_id=@p0 AND etat_dest='actif' AND brouillon=0 AND (lu=0 OR important=1) AND objet LIKE @p1 ORDER BY important DESC, date DESC LIMIT @p2 OFFSET @p3", me, U.Like(q), l, o) };
-        gMsg.Activated += id => { MessageViewer.Open(this, id); RefreshData(); };
-        gRap = new GridPanel("cab_rap") { PageSize = 50, Loader = (q, o, l) => Db.Table(@"SELECT id, numero AS 'N°', objet AS 'Objet', (SELECT prenom||' '||nom FROM collaborateurs WHERE id=destinataire_id) AS 'Responsable', substr(date_rapport,1,16) AS 'Transmis le'
-            FROM missions WHERE emetteur_id=@p0 AND statut='Rapport transmis' AND objet LIKE @p1 ORDER BY date_rapport DESC LIMIT @p2 OFFSET @p3", me, U.Like(q), l, o) };
-        gRap.Activated += id => new MissionView(id).Show(this);
-        gDem = new GridPanel("cab_dem") { PageSize = 50, Loader = (q, o, l) => Db.Table(@"SELECT id, substr(date,6,11) AS 'Date', type AS 'Type', objet AS 'Objet', (SELECT prenom||' '||nom FROM collaborateurs WHERE id=demandeur_id) AS 'Demandeur'
-            FROM demandes WHERE statut='En attente' AND objet LIKE @p0 ORDER BY id DESC LIMIT @p1 OFFSET @p2", U.Like(q), l, o) };
-        gDem.Activated += id => { using var d = new DemandeDialog(id); d.ShowDialog(); RefreshData(); };
-        gDel = new GridPanel("cab_del") { PageSize = 50, Loader = (q, o, l) => Db.Table($@"SELECT id, numero AS 'N°', objet AS 'Objet', (SELECT prenom||' '||nom FROM collaborateurs WHERE id=destinataire_id) AS 'Destinataire', statut AS 'Statut', ROUND(avancement) AS 'Avancement', substr(echeance,1,16) AS 'Échéance'
-            FROM missions WHERE emetteur_id=@p0 AND parent_id IS NULL AND statut IN {Biz.SqlActifs} AND objet LIKE @p1 ORDER BY echeance LIMIT @p2 OFFSET @p3", me, U.Like(q), l, o) };
-        gDel.Activated += id => new MissionView(id).Show(this);
-        gReu = new GridPanel("cab_reu") { PageSize = 50, Loader = (q, o, l) => Db.Table(@"SELECT r.id, substr(r.debut,1,16) AS 'Début', r.titre AS 'Titre', r.lieu AS 'Lieu', r.statut AS 'Statut' FROM reunions r JOIN reunion_participants p ON p.reunion_id=r.id
-            WHERE p.collab_id=@p0 AND r.fin>=@p1 AND r.statut IN ('Planifiée','Proposée','En cours') AND r.titre LIKE @p2 ORDER BY r.debut LIMIT @p3 OFFSET @p4", me, U.D(Engine.Now), U.Like(q), l, o) };
-        gReu.Activated += id => { using var d = new ReunionDialog(id); d.ShowDialog(); RefreshData(); };
-        gSyn = new GridPanel("cab_syn") { PageSize = 50, Loader = (q, o, l) => Db.Table(@"SELECT id, substr(date,6,11) AS 'Date', (SELECT prenom||' '||nom FROM collaborateurs WHERE id=exp_id) AS 'De', objet AS 'Objet' FROM messages
-            WHERE dest_id=@p0 AND categorie IN ('Synthèse','Bilan','Rapport','Agenda','Dossier','Demande') AND objet LIKE @p1 ORDER BY date DESC LIMIT @p2 OFFSET @p3", me, U.Like(q), l, o) };
-        gSyn.Activated += id => { MessageViewer.Open(this, id); };
-
-        var tl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2, Padding = new Padding(4) };
-        for (int i = 0; i < 3; i++) tl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3f));
-        tl.RowStyles.Add(new RowStyle(SizeType.Percent, 50)); tl.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        tl.Controls.Add(Card(gMsg, "Messages prioritaires et non lus"), 0, 0);
-        tl.Controls.Add(Card(gRap, "Rapports en attente de décision"), 1, 0);
-        tl.Controls.Add(Card(gDem, "Demandes de validation et d'arbitrage"), 2, 0);
-        tl.Controls.Add(Card(gDel, "Missions déléguées en cours"), 0, 1);
-        tl.Controls.Add(Card(gReu, "Réunions et rendez-vous à venir"), 1, 1);
-        tl.Controls.Add(Card(gSyn, "Synthèses, bilans et comptes rendus"), 2, 1);
-        Controls.Add(tl); Controls.Add(bar); Controls.Add(kp); Controls.Add(Ui.Title("Mon cabinet — tableau de bord personnel"));
-    }
-
-    public override void Nouveau() => MainForm.Instance.NewMission();
-
-    public override void RefreshData()
-    {
-        long me = Auth.CollabId; string now = U.D(Engine.Now);
-        var r = Db.Rows($@"SELECT (SELECT COUNT(*) FROM messages WHERE dest_id=@p0 AND lu=0 AND etat_dest='actif' AND brouillon=0),
-            (SELECT COUNT(*) FROM missions WHERE emetteur_id=@p0 AND statut='Rapport transmis'),
-            (SELECT COUNT(*) FROM demandes WHERE statut='En attente'),
-            (SELECT COUNT(*) FROM missions WHERE emetteur_id=@p0 AND statut IN {Biz.SqlActifs}),
-            (SELECT COUNT(*) FROM missions WHERE statut IN {Biz.SqlActifs} AND echeance<@p1),
-            (SELECT COUNT(*) FROM reunions r JOIN reunion_participants p ON p.reunion_id=r.id WHERE p.collab_id=@p0 AND substr(r.debut,1,10)=@p2 AND r.statut<>'Annulée'),
-            (SELECT COUNT(*) FROM dossiers WHERE priorite='Haute' AND statut<>'Clôturé' AND archive=0),
-            (SELECT COUNT(*) FROM notifications WHERE lu=0 AND archive=0)", me, now, Engine.Now.ToString("yyyy-MM-dd"))[0];
-        var ks = new[] { kMsg, kRap, kDem, kDel, kRet, kReu, kDos, kAl };
-        for (int i = 0; i < ks.Length; i++) ks[i].Set(r[i]);
-        foreach (var g in new[] { gMsg, gRap, gDem, gDel, gReu, gSyn }) g.Reload();
-    }
-}
-
 // ============================================================ DÉLÉGATIONS
 public class DelegationsModule : Module
 {
@@ -151,7 +64,7 @@ public class DossiersModule : Module
 {
     public override string Titre => "Dossiers";
     readonly GridPanel grid;
-    readonly ComboBox cStat = Ui.Combo(new[] { "Dossiers actifs", "Ouverts", "En cours d'instruction", "En attente", "Clôturés", "Archivés", "Tous" }, 170);
+    readonly ComboBox cStat = Ui.Combo(new[] { "Dossiers actifs", "Enquête en cours", "En attente de décision", "Transmis / information (sim.)", "Clôturés", "Archivés", "Tous" }, 200);
     readonly ComboBox cSvc = Ui.Combo(Item.Services(true), 240);
     readonly ComboBox cCat = Ui.Combo(new[] { "(Toutes catégories)" }.Concat(Seed.Categories), 200);
     readonly ComboBox cPrio = Ui.Combo(new[] { "(Toutes priorités)", "Haute", "Normale", "Basse" }, 130);
@@ -162,7 +75,7 @@ public class DossiersModule : Module
     public DossiersModule()
     {
         grid = new GridPanel("dossiers") { Loader = LoadData };
-        grid.Activated += id => Edit(id);
+        grid.Activated += id => DossierWindow.Open(id);
         grid.SelChanged += ShowDetail;
         foreach (var c in new[] { cStat, cSvc, cCat, cPrio }) c.SelectedIndexChanged += (s, e) => { grid.ResetPage(); grid.Reload(); };
         gNotes = new GridPanel("dos_notes") { Loader = (q, o, l) => Db.Table("SELECT id, substr(date,1,16) AS 'Date', (SELECT prenom||' '||nom FROM collaborateurs WHERE id=auteur_id) AS 'Auteur', texte AS 'Texte' FROM dossier_notes WHERE dossier_id=@p0 AND texte LIKE @p1 ORDER BY date DESC LIMIT @p2 OFFSET @p3", grid.SelectedId, U.Like(q), l, o) };
@@ -175,7 +88,7 @@ public class DossiersModule : Module
         Tab("Fiche", tFiche); Tab("Notes", gNotes); Tab("Historique", gHist); Tab("Tâches et missions liées", gMis); Tab("Documents", gDocs);
         tabs.SelectedIndexChanged += (s, e) => ShowDetail();
 
-        var bar = Ui.Bar(Ui.PrimaryBtn("Nouveau dossier", (s, e) => Nouveau()), Ui.Btn("Modifier / affecter", (s, e) => Edit(grid.SelectedId)),
+        var bar = Ui.Bar(Icons.Btn("dossier", "Ouvrir le dossier", (s, e) => DossierWindow.Open(grid.SelectedId), true), Icons.Btn("decision", "Préparer une décision", (s, e) => Sel(id => { using var w = new DecisionWizard(id, null, 0, 0); w.ShowDialog(); })), Ui.Btn("Nouveau dossier", (s, e) => Nouveau()), Ui.Btn("Modifier / affecter", (s, e) => Edit(grid.SelectedId)),
             Ui.Btn("Ajouter une note", (s, e) => Sel(id => { var t = Ui.Prompt("Note", "Texte de la note :", "", true); if (!string.IsNullOrWhiteSpace(t)) Db.Tx(c => Biz.NoteDossier(c, id, t)); })),
             Ui.Btn("Ajouter un document", (s, e) => Sel(id => { using var d = new DocumentDialog(0, "Documents de suivi", "", "", id); d.ShowDialog(); })),
             Ui.Btn("Créer une tâche liée", (s, e) => Sel(id =>
@@ -203,12 +116,12 @@ public class DossiersModule : Module
     DataTable LoadData(string q, int o, int l)
     {
         var w = new List<string>();
-        w.Add(cStat.SelectedIndex switch { 0 => "d.statut<>'Clôturé' AND d.archive=0", 1 => "d.statut='Ouvert' AND d.archive=0", 2 => "d.statut='En cours d''instruction' AND d.archive=0", 3 => "d.statut='En attente' AND d.archive=0", 4 => "d.statut='Clôturé'", 5 => "d.archive=1", _ => "1=1" });
+        w.Add(cStat.SelectedIndex switch { 0 => "d.statut<>'Clôturé' AND d.archive=0", 1 => "d.situation IN ('Enquête en cours','Complément demandé') AND d.archive=0", 2 => "d.situation='En attente de décision' AND d.archive=0", 3 => "d.situation IN ('Transmis à juridiction (sim.)','Information judiciaire (sim.)','Alternative en cours (sim.)')", 4 => "d.statut='Clôturé'", 5 => "d.archive=1", _ => "1=1" });
         if (Item.Of(cSvc) != 0) w.Add("d.service_id=" + Item.Of(cSvc));
         if (cCat.SelectedIndex > 0) w.Add("d.categorie=@p4");
         if (cPrio.SelectedIndex > 0) w.Add("d.priorite=@p5");
         return Db.Table($@"SELECT d.id, d.numero AS 'N°', d.intitule AS 'Intitulé', d.categorie AS 'Catégorie', (SELECT code FROM services WHERE id=d.service_id) AS 'Service',
-            (SELECT prenom||' '||nom FROM collaborateurs WHERE id=d.referent_id) AS 'Référent', d.statut AS 'Statut', d.priorite AS 'Priorité', d.avancement AS 'Avancement',
+            (SELECT prenom||' '||nom FROM collaborateurs WHERE id=d.referent_id) AS 'Référent', d.situation AS 'Situation', d.statut AS 'Statut', d.priorite AS 'Priorité', d.avancement AS 'Avancement',
             substr(d.date_ouverture,1,10) AS 'Ouverture', substr(d.echeance,1,10) AS 'Échéance', (SELECT nom FROM organismes WHERE id=d.organisme_id) AS 'Origine'
             FROM dossiers d WHERE {string.Join(" AND ", w)} AND (d.intitule LIKE @p0 OR d.numero LIKE @p0 OR d.resume LIKE @p0) ORDER BY d.id DESC LIMIT @p1 OFFSET @p2", U.Like(q), l, o, 0, cCat.Text, cPrio.Text);
     }
@@ -228,153 +141,9 @@ public class DossiersModule : Module
     }
 
     void Edit(long id) { if (id == 0) return; using var d = new DossierDialog(id); if (d.ShowDialog() == DialogResult.OK) RefreshData(); }
-    public void Focus(long id)
-    {
-        grid.Search.Text = Db.Str("SELECT numero FROM dossiers WHERE id=@p0", id) ?? "";
-        cStat.SelectedIndex = 6; grid.ResetPage(); grid.Reload(); ShowDetail();
-    }
+    public void Focus(long id) => DossierWindow.Open(id);
     public override void Nouveau() { using var d = new DossierDialog(); if (d.ShowDialog() == DialogResult.OK) RefreshData(); }
     public override void RefreshData() { grid.Reload(); ShowDetail(); }
-}
-
-// ============================================================ MESSAGERIE
-public class MessagerieModule : Module
-{
-    public override string Titre => "Messagerie";
-    readonly ListBox folders = new() { Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 10f), ItemHeight = 26, DrawMode = DrawMode.OwnerDrawFixed, IntegralHeight = false };
-    readonly string[] names = { "Boîte de réception", "Messages prioritaires", "Suivis", "Messages envoyés", "Brouillons", "Messages archivés", "Corbeille", "Flux interne des services", "Communications extérieures" };
-    readonly GridPanel grid;
-    readonly Label head = new() { Dock = DockStyle.Top, Height = 60, BackColor = Theme.Light, Padding = new Padding(8, 4, 4, 4) };
-    readonly TextBox body = new() { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Segoe UI", 10f) };
-    readonly FlowLayoutPanel links = new() { Dock = DockStyle.Bottom, Height = 36 };
-    long[] counts = new long[9];
-
-    public MessagerieModule()
-    {
-        foreach (var n in names) folders.Items.Add(n);
-        folders.SelectedIndex = 0;
-        folders.DrawItem += (s, e) =>
-        {
-            if (e.Index < 0) return;
-            bool sel = (e.State & DrawItemState.Selected) != 0;
-            e.Graphics.FillRectangle(new SolidBrush(sel ? Color.FromArgb(204, 224, 245) : Color.White), e.Bounds);
-            e.Graphics.DrawString(names[e.Index] + (counts[e.Index] > 0 ? $"  ({counts[e.Index]})" : ""), counts[e.Index] > 0 && e.Index < 2 ? new Font("Segoe UI", 10f, FontStyle.Bold) : folders.Font, new SolidBrush(Theme.Navy), e.Bounds.X + 8, e.Bounds.Y + 4);
-        };
-        folders.SelectedIndexChanged += (s, e) => { grid.ResetPage(); grid.Reload(); Preview(); };
-        grid = new GridPanel("messages") { Loader = LoadData };
-        grid.SelChanged += Preview;
-        grid.Activated += id => MessageViewer.Open(this, id);
-        var bar = Ui.Bar(Ui.PrimaryBtn("✉ Nouveau message", (s, e) => Nouveau()), Ui.Btn("Répondre", (s, e) => Reply(false)), Ui.Btn("Répondre à tous", (s, e) => Reply(true)), Ui.Btn("Transférer", (s, e) => Forward()),
-            Ui.Btn("Archiver", (s, e) => SetEtat("archive")), Ui.Btn("Supprimer", (s, e) => SetEtat("corbeille")), Ui.Btn("Restaurer", (s, e) => SetEtat("actif")),
-            Ui.Btn("★ Important", (s, e) => Toggle("important")), Ui.Btn("⚐ Suivi", (s, e) => Toggle("suivi")), Ui.Btn("Lu / non lu", (s, e) => Toggle("lu")),
-            Ui.Btn("Ouvrir le brouillon", (s, e) => OpenDraft()));
-        var left = new Panel { Dock = DockStyle.Left, Width = 230, BackColor = Color.White, Padding = new Padding(4) };
-        left.Controls.Add(folders);
-        left.Controls.Add(new Label { Text = "Dossiers", Dock = DockStyle.Top, Height = 26, Font = Theme.FB, ForeColor = Theme.Navy });
-        var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
-        split.Panel1.Controls.Add(grid);
-        var pv = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
-        pv.Controls.Add(body); pv.Controls.Add(head); pv.Controls.Add(links);
-        split.Panel2.Controls.Add(pv);
-        Controls.Add(split); Controls.Add(new Splitter { Dock = DockStyle.Left, Width = 4 }); Controls.Add(left); Controls.Add(bar); Controls.Add(Ui.Title("Messagerie interne"));
-        Load += (s, e) => { try { split.SplitterDistance = split.Height / 2; } catch { } };
-    }
-
-    DataTable LoadData(string q, int o, int l)
-    {
-        long me = Auth.CollabId;
-        string w = folders.SelectedIndex switch
-        {
-            0 => "m.dest_id=@p0 AND m.etat_dest='actif' AND m.brouillon=0",
-            1 => "m.dest_id=@p0 AND m.important=1 AND m.etat_dest<>'corbeille' AND m.brouillon=0",
-            2 => "m.suivi=1 AND (m.dest_id=@p0 OR m.exp_id=@p0)",
-            3 => "m.exp_id=@p0 AND m.brouillon=0 AND m.etat_exp='actif'",
-            4 => "m.exp_id=@p0 AND m.brouillon=1",
-            5 => "((m.dest_id=@p0 AND m.etat_dest='archive') OR (m.exp_id=@p0 AND m.etat_exp='archive'))",
-            6 => "((m.dest_id=@p0 AND m.etat_dest='corbeille') OR (m.exp_id=@p0 AND m.etat_exp='corbeille'))",
-            7 => "IFNULL(m.exp_id,0)<>@p0 AND IFNULL(m.dest_id,0)<>@p0 AND m.exp_id IS NOT NULL",
-            _ => "m.organisme_id IS NOT NULL"
-        };
-        return Db.Table($@"SELECT m.id, CASE WHEN m.dest_id=@p0 THEN m.lu ELSE 1 END AS 'Lu', m.important AS '!', substr(m.date,1,16) AS 'Date',
-            IFNULL((SELECT prenom||' '||nom FROM collaborateurs WHERE id=m.exp_id), m.exp_ext) AS 'De', (SELECT prenom||' '||nom FROM collaborateurs WHERE id=m.dest_id) AS 'À',
-            m.objet AS 'Objet', m.categorie AS 'Catégorie', (SELECT numero FROM missions WHERE id=m.mission_id) AS 'Mission', (SELECT numero FROM dossiers WHERE id=m.dossier_id) AS 'Dossier'
-            FROM messages m WHERE {w} AND (m.objet LIKE @p1 OR m.corps LIKE @p1 OR IFNULL(m.exp_ext,'') LIKE @p1) ORDER BY m.date DESC, m.id DESC LIMIT @p2 OFFSET @p3", me, U.Like(q), l, o);
-    }
-
-    void Preview()
-    {
-        links.Controls.Clear();
-        long id = grid.SelectedId;
-        if (id == 0) { head.Text = ""; body.Text = ""; return; }
-        var x = Db.Rows("SELECT date, IFNULL((SELECT prenom||' '||nom||' — '||fonction FROM collaborateurs WHERE id=exp_id), exp_ext), (SELECT prenom||' '||nom FROM collaborateurs WHERE id=dest_id), objet, corps, mission_id, dossier_id, dest_id, lu, cc, document_id FROM messages WHERE id=@p0", id)[0];
-        string cc = U.S(x[9]);
-        string ccNames = cc == "" ? "" : "   Cc : " + string.Join(", ", cc.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(s => long.TryParse(s, out var v) ? Db.Str("SELECT prenom||' '||nom FROM collaborateurs WHERE id=@p0", v) : s));
-        head.Text = $"{x[3]}\nDe : {x[1]}   →   À : {x[2]}{ccNames}\n{U.Aff(x[0])}";
-        body.Text = U.S(x[4]).Replace("\r\n", "\n").Replace("\n", "\r\n");
-        if (U.L(x[7]) == Auth.CollabId && U.L(x[8]) == 0) { Db.Exec("UPDATE messages SET lu=1 WHERE id=@p0", id); }
-        if (U.L(x[5]) != 0) links.Controls.Add(Ui.Btn("Ouvrir la mission", (s, e) => new MissionView(U.L(x[5])).Show(this)));
-        if (U.L(x[6]) != 0) links.Controls.Add(Ui.Btn("Ouvrir le dossier", (s, e) => MainForm.Instance.OpenRef("dossier", U.L(x[6]))));
-        if (U.L(x[10]) != 0) links.Controls.Add(Ui.Btn("Pièce jointe", (s, e) => { using var d = new DocumentDialog(U.L(x[10])); d.ShowDialog(); }));
-        links.Controls.Add(Ui.Btn("Exporter PDF", (s, e) => Ui.Try(() => Export.PdfOpen(U.S(x[3]), head.Text + "\n\n" + x[4]))));
-    }
-
-    void Reply(bool all)
-    {
-        long id = grid.SelectedId; if (id == 0) return;
-        var x = Db.Rows("SELECT exp_id, objet, corps, mission_id, dossier_id, cc, dest_id FROM messages WHERE id=@p0", id)[0];
-        long exp = U.L(x[0]);
-        if (exp == 0) { Ui.Info("Ce message provient d'un interlocuteur extérieur simulé : utilisez la téléphonie ou un courrier de simulation."); return; }
-        var cc = all ? U.S(x[5]).Split(';', StringSplitOptions.RemoveEmptyEntries).Select(s => long.TryParse(s, out var v) ? v : 0).Where(v => v != 0).Append(U.L(x[6])).ToList() : null;
-        using var d = new MessageDialog(exp == Auth.CollabId ? U.L(x[6]) : exp, "RE: " + x[1], "\r\n\r\n----- Message d'origine -----\r\n" + U.S(x[2]).Replace("\n", "\r\n"), U.L(x[3]), U.L(x[4]), cc);
-        if (d.ShowDialog() == DialogResult.OK) RefreshData();
-    }
-
-    void Forward()
-    {
-        long id = grid.SelectedId; if (id == 0) return;
-        var x = Db.Rows("SELECT objet, corps, mission_id, dossier_id FROM messages WHERE id=@p0", id)[0];
-        using var d = new MessageDialog(0, "TR: " + x[0], "\r\n\r\n----- Message transféré -----\r\n" + U.S(x[1]).Replace("\n", "\r\n"), U.L(x[2]), U.L(x[3]));
-        if (d.ShowDialog() == DialogResult.OK) RefreshData();
-    }
-
-    void OpenDraft()
-    {
-        long id = grid.SelectedId; if (id == 0) return;
-        var x = Db.Rows("SELECT dest_id, objet, corps, mission_id, dossier_id, brouillon FROM messages WHERE id=@p0 AND exp_id=@p1", id, Auth.CollabId);
-        if (x.Count == 0 || U.L(x[0][5]) == 0) { Ui.Info("Sélectionnez un brouillon."); return; }
-        using var d = new MessageDialog(U.L(x[0][0]), U.S(x[0][1]), U.S(x[0][2]).Replace("\n", "\r\n"), U.L(x[0][3]), U.L(x[0][4]), null, id);
-        if (d.ShowDialog() == DialogResult.OK) RefreshData();
-    }
-
-    void SetEtat(string etat)
-    {
-        long id = grid.SelectedId; if (id == 0) return;
-        Ui.Try(() =>
-        {
-            long me = Auth.CollabId;
-            Db.Exec("UPDATE messages SET etat_dest=@p1 WHERE id=@p0 AND dest_id=@p2", id, etat, me);
-            Db.Exec("UPDATE messages SET etat_exp=@p1 WHERE id=@p0 AND exp_id=@p2", id, etat, me);
-            if (etat == "corbeille" && folders.SelectedIndex == 6 && Ui.Confirm("Supprimer définitivement ce message ?")) Db.Exec("DELETE FROM messages WHERE id=@p0 AND (dest_id=@p1 OR exp_id=@p1)", id, me);
-        });
-        RefreshData();
-    }
-
-    void Toggle(string col)
-    {
-        long id = grid.SelectedId; if (id == 0) return;
-        Db.Exec($"UPDATE messages SET {col}=1-{col} WHERE id=@p0", id);
-        RefreshData();
-    }
-
-    public override void Nouveau() { using var d = new MessageDialog(); if (d.ShowDialog() == DialogResult.OK) RefreshData(); }
-    public override void RefreshData()
-    {
-        long me = Auth.CollabId;
-        var r = Db.Rows("SELECT (SELECT COUNT(*) FROM messages WHERE dest_id=@p0 AND lu=0 AND etat_dest='actif' AND brouillon=0), (SELECT COUNT(*) FROM messages WHERE dest_id=@p0 AND lu=0 AND important=1 AND etat_dest<>'corbeille'), (SELECT COUNT(*) FROM messages WHERE suivi=1 AND (dest_id=@p0 OR exp_id=@p0)), 0, (SELECT COUNT(*) FROM messages WHERE exp_id=@p0 AND brouillon=1)", me)[0];
-        counts = new long[9]; for (int i = 0; i < 5; i++) counts[i] = U.L(r[i]);
-        folders.Invalidate();
-        grid.Reload();
-    }
 }
 
 // ============================================================ TÉLÉPHONIE
@@ -411,6 +180,7 @@ public class TelephonieModule : Module
                     Db.Tx(c => { c.Exec("UPDATE appels SET dossier_id=@p1 WHERE id=@p0", id, d == 0 ? null : d); if (d != 0) Biz.DHist(c, d, Auth.CollabId, "Appel associé au dossier"); });
                 }
             })),
+            Icons.Btn("dossier", "Ouvrir le dossier", (s, e) => { long d = Db.Long("SELECT IFNULL(dossier_id,0) FROM appels WHERE id=@p0", grid.SelectedId); if (d != 0) DossierWindow.Open(d); else Ui.Info("Cet appel n'est associé à aucun dossier."); }),
             Ui.Btn("Marquer comme traité", (s, e) => Sel(id => Db.Exec("UPDATE appels SET rappel=0, statut=CASE WHEN statut IN ('Manqué','À rappeler','Rappel prévu') THEN 'Traité' ELSE statut END WHERE id=@p0", id))),
             new Label { Text = "Filtre :", AutoSize = true, Padding = new Padding(10, 8, 0, 0) }, filtre);
         var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical };

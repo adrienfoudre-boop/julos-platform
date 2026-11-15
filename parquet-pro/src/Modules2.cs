@@ -262,7 +262,7 @@ public class UniversModule : Module
         gCom.Activated += id => MessageViewer.Open(this, id);
         gApp = new GridPanel("org_app") { Loader = (q, o, l) => Db.Table("SELECT id, substr(date,1,16) AS 'Date', sens AS 'Sens', statut AS 'Statut', interlocuteur AS 'Interlocuteur', motif AS 'Motif' FROM appels WHERE organisme_id=@p0 AND motif LIKE @p1 ORDER BY date DESC LIMIT @p2 OFFSET @p3", Sel(), U.Like(q), l, o) };
         gDos = new GridPanel("org_dos") { Loader = (q, o, l) => Db.Table("SELECT id, numero AS 'N°', intitule AS 'Intitulé', statut AS 'Statut', avancement AS 'Avancement' FROM dossiers WHERE organisme_id=@p0 AND intitule LIKE @p1 ORDER BY id DESC LIMIT @p2 OFFSET @p3", Sel(), U.Like(q), l, o) };
-        gDos.Activated += id => MainForm.Instance.OpenRef("dossier", id);
+        gDos.Activated += id => MainForm.Instance?.OpenRef("dossier", id);
         void Tab(string t, Control c) { var tp = new TabPage(t); tp.Controls.Add(c); tabs.TabPages.Add(tp); }
         var pf = new Panel { Dock = DockStyle.Fill }; pf.Controls.Add(gInt); pf.Controls.Add(fiche);
         Tab("Fiche et interlocuteurs", pf); Tab("Échanges et événements", gEch); Tab("Communications", gCom); Tab("Appels", gApp); Tab("Dossiers liés", gDos);
@@ -371,19 +371,18 @@ public class StatsModule : Module
     readonly Chart c1 = new() { Type = Chart.Kind.Line, Title = "Évolution de l'activité (événements)" }, c2 = new() { Type = Chart.Kind.Bars, Title = "Missions créées / terminées" },
         c3 = new() { Type = Chart.Kind.HBars, Title = "Activité par service (missions)" }, c4 = new() { Type = Chart.Kind.Line, Title = "Évolution des dossiers (ouverts / clôturés)" },
         c5 = new() { Type = Chart.Kind.Pie, Title = "Répartition des priorités (missions actives)" }, c6 = new() { Type = Chart.Kind.HBars, Title = "Temps de traitement interne moyen (heures)" },
-        c7 = new() { Type = Chart.Kind.Bars, Title = "Charge des collaborateurs (répartition)" }, c8 = new() { Type = Chart.Kind.Pie, Title = "Répartition des missions par statut" };
+        c7 = new() { Type = Chart.Kind.Pie, Title = "Décisions du parquet par nature (période)" }, c8 = new() { Type = Chart.Kind.Pie, Title = "Situation des dossiers actifs" };
     readonly GridPanel gTab;
 
     public override bool AutoRefresh => false;
 
     public StatsModule()
     {
-        string[] noms = { "Dossiers ouverts", "Dossiers clôturés (période)", "Missions actives", "Missions terminées (période)", "Retards", "Délai moyen interne (h)", "Messages (période)", "Réunions (période)", "Événements (période)" };
+        string[] noms = { "Dossiers ouverts", "Dossiers clôturés (période)", "Missions actives", "Missions terminées (période)", "Retards", "Délai moyen interne (h)", "Décisions (période)", "Personnes détenues", "Événements (période)" };
         var kp = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 86, WrapContents = false, AutoScroll = true };
         k = noms.Select((n, i) => new Kpi(n, Theme.Palette[i % Theme.Palette.Length])).ToArray();
         kp.Controls.AddRange(k);
         foreach (var c in new[] { cPer, cSvc, cCat }) c.SelectedIndexChanged += (s, e) => RefreshData();
-        cPer.SelectedIndex = 1;
         gTab = new GridPanel("stats_tab") { Loader = (q, o, l) => Db.Table($@"SELECT s.id, s.code AS 'Service', COUNT(DISTINCT c.id) AS 'Effectif', ROUND(AVG(c.charge)) AS 'Charge',
             (SELECT COUNT(*) FROM missions m WHERE m.service_id=s.id AND m.statut IN {Biz.SqlActifs}) AS 'Missions actives',
             (SELECT COUNT(*) FROM missions m WHERE m.service_id=s.id AND m.date_rapport>=@p3) AS 'Terminées',
@@ -406,6 +405,7 @@ public class StatsModule : Module
                 Ui.ShowText("Rapport de pilotage", sb.ToString());
             })));
         Controls.Add(tl); Controls.Add(kp); Controls.Add(bar); Controls.Add(Ui.Title("Statistiques et tableaux de bord de pilotage"));
+        cPer.SelectedIndex = 1;
     }
 
     int Days => cPer.SelectedIndex switch { 0 => 7, 1 => 30, 2 => 90, _ => 365 };
@@ -422,7 +422,7 @@ public class StatsModule : Module
             var r = Db.Rows($@"SELECT (SELECT COUNT(*) FROM dossiers WHERE statut<>'Clôturé' AND archive=0{ms}{dc}), (SELECT COUNT(*) FROM dossiers WHERE date_cloture>=@p0{ms}{dc}),
                 (SELECT COUNT(*) FROM missions WHERE statut IN {Biz.SqlActifs}{ms}), (SELECT COUNT(*) FROM missions WHERE date_rapport>=@p0{ms}),
                 (SELECT COUNT(*) FROM missions WHERE statut IN {Biz.SqlActifs} AND echeance<@p1{ms}), (SELECT ROUND(AVG((julianday(date_rapport)-julianday(date_creation))*24),1) FROM missions WHERE date_rapport>=@p0{ms}),
-                (SELECT COUNT(*) FROM messages WHERE date>=@p0), (SELECT COUNT(*) FROM reunions WHERE debut>=@p0 AND debut<=@p1), (SELECT COUNT(*) FROM evenements WHERE date>=@p0{(svc == 0 ? "" : $" AND service_id={svc}")})", st, now, cCat.Text)[0];
+                (SELECT COUNT(*) FROM decisions WHERE date>=@p0), (SELECT COUNT(*) FROM detentions WHERE date_sortie IS NULL), (SELECT COUNT(*) FROM evenements WHERE date>=@p0{(svc == 0 ? "" : $" AND service_id={svc}")})", st, now, cCat.Text)[0];
             for (int i = 0; i < k.Length; i++) k[i].Set(r[i] ?? 0);
             bool week = Days > 60;
             string key = week ? "strftime('%Y-S%W', {0})" : "substr({0},1,10)";
@@ -445,11 +445,11 @@ public class StatsModule : Module
             c5.Set(a5.Select(x => U.S(x[0])).ToArray(), ("Priorités", a5.Select(x => U.Dv(x[1])).ToArray()));
             var a6 = Db.Rows("SELECT s.code, ROUND(AVG((julianday(m.date_rapport)-julianday(m.date_creation))*24),1) FROM services s JOIN missions m ON m.service_id=s.id WHERE m.date_rapport>=@p0 GROUP BY s.id ORDER BY 2 DESC", st);
             c6.Set(a6.Select(x => U.S(x[0])).ToArray(), ("Heures", a6.Select(x => U.Dv(x[1])).ToArray()));
-            var a7 = Db.Rows($"SELECT (charge/20)*20, COUNT(*) FROM collaborateurs WHERE actif=1{ms} GROUP BY 1 ORDER BY 1");
-            c7.Set(a7.Select(x => $"{U.L(x[0])}-{Math.Min(100, U.L(x[0]) + 19)}%").ToArray(), ("Collaborateurs", a7.Select(x => U.Dv(x[1])).ToArray()));
-            var a8 = Db.Rows($"SELECT statut, COUNT(*) FROM missions WHERE date_creation>=@p0{ms} GROUP BY statut", st);
-            c8.Set(a8.Select(x => U.S(x[0])).ToArray(), ("Statuts", a8.Select(x => U.Dv(x[1])).ToArray()));
-            gTab.Reload();
+            var a7 = Db.Rows("SELECT libelle, COUNT(*) FROM decisions WHERE date>=@p0 GROUP BY libelle ORDER BY 2 DESC", st);
+            c7.Set(a7.Select(x => U.S(x[0]).Replace(" (simulation)", "")).ToArray(), ("Décisions", a7.Select(x => U.Dv(x[1])).ToArray()));
+            var a8 = Db.Rows($"SELECT IFNULL(situation,'—'), COUNT(*) FROM dossiers WHERE statut<>'Clôturé' AND archive=0{ms} GROUP BY situation ORDER BY 2 DESC");
+            c8.Set(a8.Select(x => U.S(x[0])).ToArray(), ("Dossiers", a8.Select(x => U.Dv(x[1])).ToArray()));
+            gTab?.Reload();
         }
         catch (Exception e) { Log.Error(e); }
     }
@@ -459,7 +459,7 @@ public class StatsModule : Module
 public class NotificationsModule : Module
 {
     public override string Titre => "Centre de notifications";
-    public static readonly string[] Types = { "Nouveau message", "Nouvelle mission", "Rapport terminé", "Mission en retard", "Demande de validation", "Réunion proposée", "Réunion imminente", "Nouveau dossier", "Difficulté signalée", "Rapport de service disponible", "Événement institutionnel", "Appel", "Alerte technique" };
+    public static readonly string[] Types = { "Nouveau message", "Nouvelle mission", "Rapport terminé", "Mission en retard", "Demande de validation", "Réunion proposée", "Réunion imminente", "Nouveau dossier", "Difficulté signalée", "Rapport de service disponible", "Événement institutionnel", "Appel", "Alerte technique", "Nouvelle affaire", "Décision requise", "Décision juridictionnelle", "Détention" };
     readonly GridPanel grid;
     readonly ComboBox cEtat = Ui.Combo(new[] { "Non lues", "Toutes (hors archives)", "Archivées" }, 170);
     readonly ComboBox cType = Ui.Combo(new[] { "(Tous les types)" }.Concat(Types), 220);
@@ -513,7 +513,7 @@ public class ArchivesModule : Module
 {
     public override string Titre => "Archives";
     readonly GridPanel grid;
-    readonly ComboBox cType = Ui.Combo(new[] { "(Tous types)", "Dossier", "Mission", "Message archivé", "Rapport / compte rendu", "Réunion passée", "Événement", "Changement d'organisation" }, 220);
+    readonly ComboBox cType = Ui.Combo(new[] { "(Tous types)", "Dossier", "Décision", "Pièce de procédure", "Mission", "Message archivé", "Rapport / compte rendu", "Réunion passée", "Événement", "Changement d'organisation" }, 220);
     readonly DateTimePicker d1 = new() { Format = DateTimePickerFormat.Short, Width = 110, Margin = new Padding(3, 6, 3, 3) }, d2 = new() { Format = DateTimePickerFormat.Short, Width = 110, Margin = new Padding(3, 6, 3, 3) };
 
     public override bool AutoRefresh => false;
@@ -527,6 +527,8 @@ public class ArchivesModule : Module
             UNION ALL SELECT 'Message archivé', 'message', id, substr(date,1,16), objet, IFNULL((SELECT prenom||' '||nom FROM collaborateurs WHERE id=exp_id), exp_ext) FROM messages WHERE etat_dest='archive' OR etat_exp='archive'
             UNION ALL SELECT 'Rapport / compte rendu', 'document', id, substr(date,1,16), numero||' — '||titre, categorie FROM documents WHERE categorie IN ('Comptes rendus','Rapports d''activité','Bilans','Synthèses') OR archive=1
             UNION ALL SELECT 'Réunion passée', 'reunion', id, substr(debut,1,16), titre, statut FROM reunions WHERE fin<@p3
+            UNION ALL SELECT 'Décision', 'decision', id, substr(date,1,16), ref||' — '||libelle||' — '||orientation, etat_execution FROM decisions
+            UNION ALL SELECT 'Pièce de procédure', 'piece', id, substr(date,1,16), cote||' — '||titre||' ('||(SELECT numero FROM dossiers WHERE id=dossier_id)||')', type FROM pieces WHERE dossier_id IN (SELECT id FROM dossiers WHERE statut='Clôturé')
             UNION ALL SELECT 'Événement', 'evenement', id, substr(date,1,16), description, type FROM evenements
             UNION ALL SELECT 'Changement d''organisation', 'collaborateur', collab_id, substr(date,1,16), (SELECT prenom||' '||nom FROM collaborateurs WHERE id=collab_id)||' : '||IFNULL(motif,''), (SELECT nom FROM services WHERE id=nouveau_service) FROM affectations_hist
             ) WHERE (Libellé LIKE @p0 OR Détail LIKE @p0) AND Date>=@p4 AND Date<=@p5 AND (@p6='(Tous types)' OR Type=@p6) ORDER BY Date DESC LIMIT @p1 OFFSET @p2",
